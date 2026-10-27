@@ -184,7 +184,7 @@
 
     <!-- Skripty -->
     <script>
-        // SEM VLOŽTE ID VAŠÍ GOOGLE TABULKY (mezi uvozovky)
+        // SEM VLOŽTE ID VAŠÍ GOOGLE TABULKY
         const SPREADSHEET_ID = "1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30";
         
         let appData = { Treninky: [], Cviceni: [], VALD: [], Normy: [], Metodika: [] };
@@ -200,11 +200,11 @@
             const statusText = document.getElementById('status-text');
             
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
-            statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání dat z tabulky...`;
+            statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání dat...`;
 
             try {
                 const sheetNames = ['Treninky', 'Cviceni', 'VALD', 'Normy', 'Metodika'];
-                const results = await Promise.all(sheetNames.map(name => fetchGvizSheet(name)));
+                const results = await Promise.all(sheetNames.map(name => fetchGvizSheetByIndex(name)));
                 
                 sheetNames.forEach((name, index) => {
                     appData[name] = results[index];
@@ -223,7 +223,7 @@
             }
         }
 
-        async function fetchGvizSheet(sheetName) {
+        async function fetchGvizSheetByIndex(sheetName) {
             const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
             const response = await fetch(url);
             const text = await response.text();
@@ -232,27 +232,58 @@
             const json = JSON.parse(jsonString);
             
             const rows = json.table.rows;
-            const cols = json.table.cols;
-            const headers = cols.map(c => c && c.label ? c.label.trim() : '');
             
+            // Mapování podle pozice sloupců (ignorujeme názvy v hlavičce)
             return rows.map(r => {
-                const obj = {};
-                if (r && r.c) {
-                    r.c.forEach((cell, i) => {
-                        const rawHeader = headers[i] || `col_${i}`;
-                        const val = cell && cell.v !== null && cell.v !== undefined ? cell.v : '';
-                        
-                        obj[rawHeader] = val;
-                        
-                        const cleanKey = rawHeader.toLowerCase()
-                            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-                            .replace(/[^a-z0-9]/g, '_')
-                            .replace(/_+/g, '_')
-                            .replace(/^_|_$/g, '');
-                        obj[cleanKey] = val;
-                    });
+                const c = r && r.c ? r.c : [];
+                const getCell = (idx) => (c[idx] && c[idx].v !== null && c[idx].v !== undefined) ? c[idx].v : '';
+
+                if (sheetName === 'Treninky') {
+                    return {
+                        varianta: getCell(0),
+                        skupina: getCell(1),
+                        kategorie: getCell(2),
+                        misto_cas_delka: getCell(3),
+                        cil: getCell(4),
+                        pomucky: getCell(5),
+                        cviceni_ids: getCell(6),
+                        harmonogram: getCell(7),
+                        pokyny: getCell(8)
+                    };
+                } else if (sheetName === 'Cviceni') {
+                    return {
+                        id: getCell(0),
+                        nazev: getCell(1),
+                        kategorie_skupina: getCell(2),
+                        davkovani: getCell(3),
+                        popis: getCell(4),
+                        fokus: getCell(5)
+                    };
+                } else if (sheetName === 'VALD') {
+                    return {
+                        sekce: getCell(0),
+                        nadpis: getCell(1),
+                        obsah: getCell(2)
+                    };
+                } else if (sheetName === 'Normy') {
+                    return {
+                        skupina: getCell(0),
+                        metrika: getCell(1),
+                        hodnota: getCell(2),
+                        jednotka: getCell(3),
+                        kategorie: getCell(4),
+                        post: getCell(5),
+                        uroven: getCell(6),
+                        zdroj: getCell(7)
+                    };
+                } else if (sheetName === 'Metodika') {
+                    return {
+                        tema: getCell(0),
+                        nadpis: getCell(1),
+                        text: getCell(2)
+                    };
                 }
-                return obj;
+                return {};
             });
         }
 
