@@ -58,7 +58,7 @@
     <!-- Stavové hlášení -->
     <div id="status-bar" class="px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs text-slate-400 flex items-center justify-between">
         <span id="status-text" class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Načítání dat z tabulky...
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Načítání dat...
         </span>
         <span id="last-update" class="text-[10px] text-slate-500"></span>
     </div>
@@ -184,6 +184,7 @@
 
     <!-- Skripty -->
     <script>
+        // SEM VLOŽTE ID VAŠÍ GOOGLE TABULKY
         const SPREADSHEET_ID = "1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30";
         
         let appData = { Treninky: [], Cviceni: [], VALD: [], Normy: [], Metodika: [] };
@@ -198,12 +199,18 @@
             const refreshIcon = document.getElementById('refresh-icon');
             const statusText = document.getElementById('status-text');
             
+            if (SPREADSHEET_ID.includes("1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30") || SPREADSHEET_ID.length < 10) {
+                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Chybí ID tabulky!`;
+                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-sm">Vložte ID vaší tabulky do proměnné SPREADSHEET_ID v kódu.</div>`;
+                return;
+            }
+
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
             statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání dat...`;
 
             try {
                 const sheetNames = ['Treninky', 'Cviceni', 'VALD', 'Normy', 'Metodika'];
-                const results = await Promise.all(sheetNames.map(name => fetchGvizSheetByIndex(name)));
+                const results = await Promise.all(sheetNames.map(name => fetchCSVSheet(name)));
                 
                 sheetNames.forEach((name, index) => {
                     appData[name] = results[index];
@@ -216,26 +223,45 @@
             } catch (err) {
                 console.error(err);
                 statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Chyba načítání`;
-                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Zkontrolujte SPREADSHEET_ID v kódu.</div>`;
+                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-sm">Chyba při stahování. Zkontrolujte, zda je tabulka veřejně sdílená ("Kdokoliv s odkazem může číst").</div>`;
             } finally {
                 if (refreshIcon) refreshIcon.classList.remove('animate-spin');
             }
         }
 
-        async function fetchGvizSheetByIndex(sheetName) {
-            const url = `https://docs.google.com/spreadsheets/d/${1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+        async function fetchCSVSheet(sheetName) {
+            const url = `https://docs.google.com/spreadsheets/d/${1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
             const response = await fetch(url);
             const text = await response.text();
             
-            const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-            const json = JSON.parse(jsonString);
-            
-            // .slice(1) přeskočí první řádek s hlavičkou tabulky, aby se data neposunula
-            const rows = json.table.rows.slice(1);
-            
-            return rows.map(r => {
-                const c = r && r.c ? r.c : [];
-                const getCell = (idx) => (c[idx] && c[idx].v !== null && c[idx].v !== undefined) ? c[idx].v : '';
+            const lines = text.split('\n');
+            if (lines.length <= 1) return [];
+
+            const parseCSVLine = (line) => {
+                const row = [];
+                let insideQuotes = false;
+                let entry = '';
+                for (let i = 0; i < line.length; i++) {
+                    let c = line[i];
+                    if (c === '"') {
+                        if (insideQuotes && line[i + 1] === '"') { entry += '"'; i++; }
+                        else { insideQuotes = !insideQuotes; }
+                    } else if (c === ',' && !insideQuotes) {
+                        row.push(entry.trim());
+                        entry = '';
+                    } else {
+                        entry += c;
+                    }
+                }
+                row.push(entry.trim());
+                return row.map(val => val.replace(/^"|"$/g, ''));
+            };
+
+            const rows = lines.map(parseCSVLine).filter(r => r.length > 0 && r.some(x => x !== ''));
+            const dataRows = rows.slice(1); // Přeskočí hlavičku
+
+            return dataRows.map(c => {
+                const getCell = (idx) => (c[idx] !== undefined && c[idx] !== null) ? c[idx] : '';
 
                 if (sheetName === 'Treninky') {
                     return {
@@ -380,4 +406,77 @@
             }
 
             container.innerHTML = filtered.map(c => `
-                <div class="bg-slate
+                <div class="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-2">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-sky-400 bg-sky-950 border border-sky-800 px-2 py-0.5 rounded">\${val(c.id)}</span>
+                            <h4 class="font-bold text-slate-100 text-sm">\${val(c.nazev)}</h4>
+                        </div>
+                        <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">\${val(c.kategorie_skupina)}</span>
+                    </div>
+                    <div class="text-xs text-slate-300"><strong class="text-slate-400">Dávkování:</strong> \${val(c.davkovani)}</div>
+                    <p class="text-xs text-slate-400 leading-relaxed">\${val(c.popis)}</p>
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80 text-xs">
+                        <span class="text-emerald-400 font-semibold">Fokus:</span> <span class="text-slate-300">\${val(c.fokus)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderVALD() {
+            const container = document.getElementById('container-vald');
+            if (!appData.VALD || appData.VALD.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné protokoly VALD nebyly nalezeny.</div>`;
+                return;
+            }
+            container.innerHTML = appData.VALD.map(v => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
+                    <span class="text-[10px] font-bold text-emerald-400 uppercase bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded">\${val(v.sekce)}</span>
+                    <h3 class="text-base font-bold text-white">\${val(v.nadpis)}</h3>
+                    <div class="text-xs text-slate-300 whitespace-pre-line leading-relaxed pt-1">\${val(v.obsah)}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderNormy() {
+            const container = document.getElementById('container-normy');
+            if (!appData.Normy || appData.Normy.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné normy nebyly nalezeny.</div>`;
+                return;
+            }
+            const groups = {};
+            appData.Normy.forEach(n => {
+                const g = n.skupina || 'Ostatní';
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(n);
+            });
+
+            container.innerHTML = Object.keys(groups).map(g => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <h3 class="font-bold text-white text-base border-b border-slate-800 pb-2">\${g}</h3>
+                    <div class="space-y-2">
+                        \${groups[g].map(item => `
+                            <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 flex flex-col gap-1 text-xs">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-bold text-slate-200">${val(item.metrika)}</span>
+                                    <span class="text-amber-400 font-bold bg-amber-950/50 border border-amber-800 px-2 py-0.5 rounded">${val(item.hodnota)} ${val(item.jednotka)}</span>
+                                </div>
+                                <div class="text-slate-400 flex gap-2">
+                                    <span>Kat: ${val(item.kategorie)}</span><span>•</span><span>Post: ${val(item.post)}</span><span>•</span><span class="text-sky-400">${val(item.uroven)}</span>
+                                </div>
+                                ${item.zdroj ? `<div class="text-[10px] text-slate-500 italic mt-0.5">Zdroj: \${item.zdroj}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderMetodika() {
+            const container = document.getElementById('container-metodika');
+            if (!appData.Metodika || appData.Metodika.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádná metodika nebyla nalezena.</div>`;
+                return;
+            }
+            container.innerHTML = appData.Metodika.map(m => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p
