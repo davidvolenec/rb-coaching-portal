@@ -58,7 +58,7 @@
     <!-- Stavové hlášení -->
     <div id="status-bar" class="px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs text-slate-400 flex items-center justify-between">
         <span id="status-text" class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání z Google Apps Script API...
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání dat...
         </span>
         <span id="last-update" class="text-[10px] text-slate-500"></span>
     </div>
@@ -87,7 +87,7 @@
                 </div>
                 <div class="relative">
                     <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-500"></i>
-                    <input type="text" id="search-cviceni" oninput="filterCviceni()" placeholder="Hledat cvičení (ID, název, popis...)" 
+                    <input type="text" id="search-cviceni" oninput="filterCviceni()" placeholder="Hledat cvičení..." 
                            class="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500">
                 </div>
                 <div id="cat-buttons" class="flex gap-2 overflow-x-auto no-scrollbar pb-1 text-xs">
@@ -195,29 +195,38 @@
             const statusText = document.getElementById('status-text');
             
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
-            statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Načítání z API...`;
+            statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Stahuji data z API...`;
 
             try {
-                const sheetNames = ['Treninky', 'Cviceni', 'VALD', 'Normy', 'Metodika'];
-                
-                for (let name of sheetNames) {
-                    const res = await fetch(`${API_URL}?sheet=${encodeURIComponent(name)}`, { redirect: 'follow' });
-                    const raw = await res.json();
-                    appData[name] = parseRows(raw);
+                // Stáhneme data bez parametrů (univerzální požadavek)
+                const res = await fetch(API_URL, { redirect: 'follow' });
+                const json = await res.json();
+
+                // Zkusíme rozpoznat, jak nám Apps Script data vrátil
+                // Varianta 1: Vrací objekt s názvy listů jako klíči ({ Treninky: [...], Cviceni: [...] })
+                if (json && typeof json === 'object' && !Array.isArray(json)) {
+                    for (let key in appData) {
+                        // Hledáme klíč case-insensitive (Treninky, tréninky, Cviceni atd.)
+                        const foundKey = Object.keys(json).find(k => k.toLowerCase().includes(key.toLowerCase().substring(0, 4)));
+                        if (foundKey && Array.isArray(json[foundKey])) {
+                            appData[key] = parseRows(json[foundKey]);
+                        }
+                    }
+                } 
+                // Varianta 2: Vrací pole záložek nebo matici
+                else if (Array.isArray(json)) {
+                    // Pokud je to pole polí (matice), uložíme do Cvičení jako hlavní nouzovka
+                    appData.Cviceni = parseRows(json);
                 }
 
-                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> Data aktuální`;
+                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> Data načtena`;
                 document.getElementById('last-update').innerText = new Date().toLocaleTimeString('cs-CZ', {hour: '2-digit', minute:'2-digit'});
 
                 renderAll();
             } catch (err) {
-                console.error("Chyba načítání:", err);
-                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Chyba načtení API`;
-                document.getElementById('container-treninky').innerHTML = `
-                    <div class="p-4 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-sm space-y-2">
-                        <strong class="block text-base text-white">Chyba připojení k API</strong>
-                        <p class="text-xs text-red-300 font-mono">\${err.message || err}</p>
-                    </div>`;
+                console.error("Chyba:", err);
+                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Chyba zpracování dat`;
+                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-sm">Chyba: ${err.message}</div>`;
             } finally {
                 if (refreshIcon) refreshIcon.classList.remove('animate-spin');
             }
@@ -229,20 +238,34 @@
             if (raw.data && Array.isArray(raw.data)) rows = raw.data;
             if (!Array.isArray(rows) || rows.length <= 1) return [];
 
-            // Přeskočíme hlavičku (index 0) a vezmeme čistá data
             return rows.slice(1).map(r => {
-                return {
-                    col0: r[0] !== undefined && r[0] !== null ? String(r[0]).trim() : '',
-                    col1: r[1] !== undefined && r[1] !== null ? String(r[1]).trim() : '',
-                    col2: r[2] !== undefined && r[2] !== null ? String(r[2]).trim() : '',
-                    col3: r[3] !== undefined && r[3] !== null ? String(r[3]).trim() : '',
-                    col4: r[4] !== undefined && r[4] !== null ? String(r[4]).trim() : '',
-                    col5: r[5] !== undefined && r[5] !== null ? String(r[5]).trim() : '',
-                    col6: r[6] !== undefined && r[6] !== null ? String(r[6]).trim() : '',
-                    col7: r[7] !== undefined && r[7] !== null ? String(r[7]).trim() : '',
-                    col8: r[8] !== undefined && r[8] !== null ? String(r[8]).trim() : ''
-                };
-            }).filter(item => item.col0 !== '' || item.col1 !== '' || item.col2 !== '');
+                if (Array.isArray(r)) {
+                    return {
+                        col0: r[0] !== undefined && r[0] !== null ? String(r[0]).trim() : '',
+                        col1: r[1] !== undefined && r[1] !== null ? String(r[1]).trim() : '',
+                        col2: r[2] !== undefined && r[2] !== null ? String(r[2]).trim() : '',
+                        col3: r[3] !== undefined && r[3] !== null ? String(r[3]).trim() : '',
+                        col4: r[4] !== undefined && r[4] !== null ? String(r[4]).trim() : '',
+                        col5: r[5] !== undefined && r[5] !== null ? String(r[5]).trim() : '',
+                        col6: r[6] !== undefined && r[6] !== null ? String(r[6]).trim() : '',
+                        col7: r[7] !== undefined && r[7] !== null ? String(r[7]).trim() : '',
+                        col8: r[8] !== undefined && r[8] !== null ? String(r[8]).trim() : ''
+                    };
+                } else if (typeof r === 'object') {
+                    return {
+                        col0: r.id || r.varianta || r.sekce || r.skupina || r.tema || Object.values(r)[0] || '',
+                        col1: r.kategorie_skupina || r.skupina || r.nadpis || r.metrika || Object.values(r)[1] || '',
+                        col2: r.nazev || r.obsah || r.hodnota || r.text || Object.values(r)[2] || '',
+                        col3: r.davkovani || r.jednotka || Object.values(r)[3] || '',
+                        col4: r.popis || r.kategorie || Object.values(r)[4] || '',
+                        col5: r.fokus || r.post || Object.values(r)[5] || '',
+                        col6: r.cviceni_ids || r.uroven || Object.values(r)[6] || '',
+                        col7: r.harmonogram || r.zdroj || Object.values(r)[7] || '',
+                        col8: r.pokyny || Object.values(r)[8] || ''
+                    };
+                }
+                return null;
+            }).filter(item => item !== null && (item.col0 !== '' || item.col1 !== ''));
         }
 
         function renderAll() {
@@ -264,12 +287,214 @@
             const searchVal = document.getElementById('search-cviceni').value.toLowerCase();
 
             if (!data || data.length === 0) {
-                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">V záložce 'Cviceni' nejsou žádná data.</div>`;
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádná data v knihovně cvičení.</div>`;
                 return;
             }
 
-            // Podle vašeho screenshotu: col0 = id, col1 = kategorie_skupina, col2 = nazev, col3 = davkovani, col4 = popis, col5 = fokus
             const cats = ['Vše', ...new Set(data.map(c => c.col1).filter(x => x !== ''))];
             const catContainer = document.getElementById('cat-buttons');
             catContainer.innerHTML = cats.map(c => `
-                <button onclick="filterCat('${c}')" class="cat-btn ${activeCategory === c ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate
+                <button onclick="filterCat('${c}')" class="cat-btn ${activeCategory === c ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300'} px-3 py-1.5 rounded-full font-medium whitespace-nowrap border border-slate-700">${c}</button>
+            `).join('');
+
+            const filtered = data.filter(c => {
+                const matchCat = (activeCategory === 'Vše') || (c.col1 === activeCategory);
+                const matchSearch = c.col0.toLowerCase().includes(searchVal) || 
+                                    c.col2.toLowerCase().includes(searchVal) || 
+                                    c.col4.toLowerCase().includes(searchVal);
+                return matchCat && matchSearch;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné cvičení neodpovídá filtru.</div>`;
+                return;
+            }
+
+            container.innerHTML = filtered.map(c => `
+                <div class="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-2">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-sky-400 bg-sky-950 border border-sky-800 px-2 py-0.5 rounded">${c.col0}</span>
+                            <h4 class="font-bold text-slate-100 text-sm">${c.col2}</h4>
+                        </div>
+                        <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">${c.col1}</span>
+                    </div>
+                    <div class="text-xs text-slate-300"><strong class="text-slate-400">Dávkování:</strong> ${c.col3}</div>
+                    <p class="text-xs text-slate-400 leading-relaxed">${c.col4}</p>
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80 text-xs">
+                        <span class="text-emerald-400 font-semibold">Fokus:</span> <span class="text-slate-300">${c.col5}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderTreninky() {
+            const container = document.getElementById('container-treninky');
+            const data = appData.Treninky;
+            if (!data || data.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné tréninkové jednotky.</div>`;
+                return;
+            }
+            container.innerHTML = data.map(t => {
+                const cviceniIds = t.col6 ? t.col6.split(',').map(id => id.trim()).filter(id => id).map(id => 
+                    `<button onclick="openCviceniModal('${id}')" class="bg-sky-950 text-sky-400 border border-sky-800 px-2 py-0.5 rounded text-xs font-semibold hover:bg-sky-900 transition">${id}</button>`
+                ).join(' ') : '<span class="text-xs text-slate-500">Bez přiřazených cvičení</span>';
+
+                return `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                    <div class="p-4 space-y-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <span class="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded uppercase tracking-wider">${val(t.col0)}</span>
+                                <h3 class="text-base font-bold text-white mt-1">${val(t.col1)}</h3>
+                            </div>
+                            <span class="text-xs font-medium text-slate-400 bg-slate-800 px-2 py-1 rounded whitespace-nowrap">${val(t.col2)}</span>
+                        </div>
+                        <div class="text-xs text-slate-300 flex items-center gap-1.5">
+                            <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+                            <span>${val(t.col3)}</span>
+                        </div>
+                        <div class="text-xs text-slate-300"><strong class="text-slate-400">Cíl:</strong> ${val(t.col4)}</div>
+                        <div class="text-xs text-slate-300"><strong class="text-slate-400">Pomůcky:</strong> ${val(t.col5)}</div>
+                        <div class="pt-2 flex flex-wrap gap-1 items-center">
+                            <span class="text-xs text-slate-400 mr-1 font-semibold">Cvičení:</span>
+                            ${cviceniIds}
+                        </div>
+                    </div>
+                    <details class="group border-t border-slate-800/80 bg-slate-900/50">
+                        <summary class="flex items-center justify-between px-4 py-2.5 text-xs font-medium text-slate-400 cursor-pointer hover:text-slate-200">
+                            <span>Harmonogram a trenérské pokyny</span>
+                            <i data-lucide="chevron-down" class="w-4 h-4 transition-transform group-open:rotate-180"></i>
+                        </summary>
+                        <div class="px-4 pb-4 pt-1 space-y-3 text-xs border-t border-slate-800/50">
+                            <div>
+                                <div class="font-semibold text-slate-300 mb-1">Časový rozpis:</div>
+                                <div class="text-slate-400 bg-slate-950 p-2.5 rounded border border-slate-800/80 whitespace-pre-line leading-relaxed">${val(t.col7)}</div>
+                            </div>
+                            <div>
+                                <div class="font-semibold text-emerald-400 mb-1">Pokyny pro trenéry:</div>
+                                <div class="text-slate-300 bg-emerald-950/20 border border-emerald-900/40 p-2.5 rounded leading-relaxed">${val(t.col8)}</div>
+                            </div>
+                        </div>
+                    </details>
+                </div>`;
+            }).join('');
+        }
+
+        function renderVALD() {
+            const container = document.getElementById('container-vald');
+            const data = appData.VALD;
+            if (!data || data.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné záznamy VALD.</div>`;
+                return;
+            }
+            container.innerHTML = data.map(v => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
+                    <span class="text-[10px] font-bold text-emerald-400 uppercase bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded">${val(v.col0)}</span>
+                    <h3 class="text-base font-bold text-white">${val(v.col1)}</h3>
+                    <div class="text-xs text-slate-300 whitespace-pre-line leading-relaxed pt-1">${val(v.col2)}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderNormy() {
+            const container = document.getElementById('container-normy');
+            const data = appData.Normy;
+            if (!data || data.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádné výkonnostní normy.</div>`;
+                return;
+            }
+            const groups = {};
+            data.forEach(n => {
+                const g = val(n.col0) !== '-' ? val(n.col0) : 'Ostatní';
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(n);
+            });
+            container.innerHTML = Object.keys(groups).map(g => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <h3 class="font-bold text-white text-base border-b border-slate-800 pb-2">${g}</h3>
+                    <div class="space-y-2">
+                        ${groups[g].map(item => `
+                            <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 flex flex-col gap-1 text-xs">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-bold text-slate-200">${val(item.col1)}</span>
+                                    <span class="text-amber-400 font-bold bg-amber-950/50 border border-amber-800 px-2 py-0.5 rounded">${val(item.col2)} ${val(item.col3)}</span>
+                                </div>
+                                <div class="text-slate-400 flex flex-wrap gap-2 text-[11px] mt-1">
+                                    <span>Kat: ${val(item.col4)}</span><span>•</span><span>Post: ${val(item.col5)}</span><span>•</span><span class="text-sky-400 font-medium">${val(item.col6)}</span>
+                                </div>
+                                ${val(item.col7) !== '-' ? `<div class="text-[10px] text-slate-500 italic mt-0.5">Zdroj: ${val(item.col7)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderMetodika() {
+            const container = document.getElementById('container-metodika');
+            const data = appData.Metodika;
+            if (!data || data.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Žádná metodika.</div>`;
+                return;
+            }
+            container.innerHTML = data.map(m => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
+                    <span class="text-[10px] font-bold text-purple-400 uppercase bg-purple-950/80 border border-purple-800 px-2 py-0.5 rounded">${val(m.col0)}</span>
+                    <h3 class="text-base font-bold text-white">${val(m.col1)}</h3>
+                    <div class="text-xs text-slate-300 whitespace-pre-line leading-relaxed pt-1">${val(m.col2)}</div>
+                </div>
+            `).join('');
+        }
+
+        function openCviceniModal(id) {
+            const data = appData.Cviceni || [];
+            const c = data.find(item => item.col0.trim().toLowerCase() === String(id).trim().toLowerCase());
+            if (!c) {
+                alert(`Cvičení s kódem "${id}" nebylo nalezeno.`);
+                return;
+            }
+            document.getElementById('modal-id').innerText = c.col0;
+            document.getElementById('modal-nazev').innerText = c.col2;
+            document.getElementById('modal-davkovani').innerText = c.col3;
+            document.getElementById('modal-popis').innerText = c.col4;
+            document.getElementById('modal-fokus').innerText = c.col5;
+
+            const modal = document.getElementById('modal-cviceni');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal-cviceni');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(el => {
+                el.classList.remove('active', 'text-emerald-400');
+                el.classList.add('text-slate-400');
+            });
+            const selectedTab = document.getElementById(`sec-${tabId}`);
+            if (selectedTab) selectedTab.classList.remove('hidden');
+
+            const activeNavBtn = event.currentTarget;
+            if (activeNavBtn) {
+                activeNavBtn.classList.add('active', 'text-emerald-400');
+                activeNavBtn.classList.remove('text-slate-400');
+            }
+        }
+
+        function filterCat(category) {
+            activeCategory = category;
+            renderCviceni();
+        }
+
+        function filterCviceni() {
+            renderCviceni();
+        }
+    </script>
+</body>
+</html>
