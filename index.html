@@ -184,7 +184,7 @@
 
     <!-- Skripty -->
     <script>
-        // SEM VLOŽTE ID VAŠÍ GOOGLE TABULKY (mezi /d/ a /edit v adrese tabulky)
+        // SEM VLOŽTE ID VAŠÍ GOOGLE TABULKY (mezi uvozovky)
         const SPREADSHEET_ID = "1aiNOlAD1TsergSK9E_SY4oc_zmkqESp2W1LnxAvLn30";
         
         let appData = { Treninky: [], Cviceni: [], VALD: [], Normy: [], Metodika: [] };
@@ -217,7 +217,7 @@
             } catch (err) {
                 console.error(err);
                 statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Chyba načítání`;
-                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Nezapomeňte v kódu nastavit správné SPREADSHEET_ID vaší tabulky!</div>`;
+                document.getElementById('container-treninky').innerHTML = `<div class="p-4 bg-slate-900 rounded-lg text-slate-400 text-sm">Zkontrolujte SPREADSHEET_ID v kódu.</div>`;
             } finally {
                 if (refreshIcon) refreshIcon.classList.remove('animate-spin');
             }
@@ -228,7 +228,6 @@
             const response = await fetch(url);
             const text = await response.text();
             
-            // Oříznutí google obálky a převod na JSON
             const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
             const json = JSON.parse(jsonString);
             
@@ -240,8 +239,17 @@
                 const obj = {};
                 if (r && r.c) {
                     r.c.forEach((cell, i) => {
-                        const key = headers[i] || `col_${i}`;
-                        obj[key] = cell && cell.v !== null && cell.v !== undefined ? cell.v : '';
+                        const rawHeader = headers[i] || `col_${i}`;
+                        const val = cell && cell.v !== null && cell.v !== undefined ? cell.v : '';
+                        
+                        obj[rawHeader] = val;
+                        
+                        const cleanKey = rawHeader.toLowerCase()
+                            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                            .replace(/[^a-z0-9]/g, '_')
+                            .replace(/_+/g, '_')
+                            .replace(/^_|_$/g, '');
+                        obj[cleanKey] = val;
                     });
                 }
                 return obj;
